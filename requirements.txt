@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-sqlalchemy
+sqlalchemy>=1.4
 asyncpg
-psycopg2-binary
 itsdangerous
+python-multipart
