@@ -4,16 +4,30 @@
     {
       "src": "api/index.py",
       "use": "@vercel/python"
+    },
+    {
+      "src": "dashboard.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "login.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "login_guru.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "quiz.html",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "api/index.py"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/$1"
-    }
+    { "src": "/api/(.*)", "dest": "api/index.py" },
+    { "src": "/dashboard", "dest": "dashboard.html" },
+    { "src": "/quiz", "dest": "quiz.html" },
+    { "src": "/login_guru", "dest": "login_guru.html" },
+    { "src": "/", "dest": "login.html" }
   ]
 }
+
