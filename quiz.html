@@ -11,45 +11,27 @@
       margin: 0;
       padding: 2rem;
       display: flex;
-      justify-content: center;
+      flex-direction: column;
       align-items: center;
       min-height: 100vh;
     }
-
-    .quiz-card {
+    h1 {
+      text-align: center;
+      color: #1565c0;
+      margin-bottom: 1rem;
+    }
+    .container {
       background: white;
       border-radius: 12px;
       box-shadow: 0 6px 18px rgba(0,0,0,0.1);
       padding: 2rem;
-      max-width: 600px;
+      max-width: 700px;
       width: 100%;
-      animation: fadeIn 0.6s ease-in-out;
+      margin-bottom: 2rem;
     }
-
-    .quiz-title {
-      font-size: 1.6rem;
-      font-weight: 600;
-      color: #1565c0;
-      margin-bottom: 1.5rem;
-      text-align: center;
+    .question {
+      margin-bottom: 1rem;
     }
-
-    .form-input {
-      width: 100%;
-      padding: 12px;
-      margin: 10px 0;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      font-size: 1rem;
-      transition: border-color 0.3s;
-    }
-
-    .form-input:focus {
-      border-color: #42a5f5;
-      outline: none;
-      box-shadow: 0 0 5px rgba(66,165,245,0.4);
-    }
-
     .submit-btn {
       width: 100%;
       padding: 12px;
@@ -62,80 +44,140 @@
       cursor: pointer;
       transition: transform 0.2s, box-shadow 0.2s;
     }
-
     .submit-btn:hover {
       transform: translateY(-2px);
       box-shadow: 0 6px 15px rgba(66,165,245,0.3);
     }
-
-    .message {
+    table {
+      width: 100%;
+      border-collapse: collapse;
       margin-top: 1rem;
+    }
+    th, td {
       padding: 10px;
-      border-radius: 6px;
-      font-size: 0.95rem;
-      display: none;
+      border: 1px solid #ddd;
+      text-align: left;
     }
-
-    .message.success {
-      color: #2e7d32;
-      background: #e8f5e9;
-      border-left: 4px solid #43a047;
-    }
-
-    .message.error {
-      color: #c62828;
-      background: #ffebee;
-      border-left: 4px solid #f44336;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
+    th {
+      background: #42a5f5;
+      color: white;
     }
   </style>
 </head>
 <body>
-  <div class="quiz-card">
-    <h2 class="quiz-title">📝 Kerjakan Kuis</h2>
+  <h1>Kerjakan Kuis</h1>
+  
+  <!-- Form Kuis -->
+  <div class="container">
+    <h2>Soal Kuis Matematika</h2>
     <form id="quizForm">
-      <input type="text" id="quiz_name" class="form-input" placeholder="Nama Kuis (misalnya: Matematika Bab 1)" required />
-      <input type="number" id="score" class="form-input" placeholder="Skor Anda (0-100)" min="0" max="100" required />
-      <button type="submit" class="submit-btn">Submit Skor</button>
+      <div class="question">
+        <p>1. Berapakah hasil dari 15 + 20?</p>
+        <input type="number" id="answer1" required />
+      </div>
+      <button type="submit" class="submit-btn">Kirim Jawaban</button>
     </form>
-    <div id="msg" class="message"></div>
+    <div id="quizMessage"></div>
+  </div>
+
+  <!-- Profil Murid -->
+  <div class="container">
+    <h2>Profil & Skor Anda</h2>
+    <div id="profileInfo">
+      <p>Memuat data...</p>
+    </div>
+  </div>
+
+  <!-- Leaderboard -->
+  <div class="container">
+    <h2>Papan Peringkat</h2>
+    <div id="leaderboardInfo">
+      <p>Memuat data...</p>
+    </div>
   </div>
 
   <script>
-    const form = document.getElementById("quizForm");
-    const msgBox = document.getElementById("msg");
+    const quizForm = document.getElementById("quizForm");
+    const quizMessage = document.getElementById("quizMessage");
+    const profileInfo = document.getElementById("profileInfo");
+    const leaderboardInfo = document.getElementById("leaderboardInfo");
 
-    form.addEventListener("submit", async (e) => {
+    quizForm.addEventListener("submit", async (e) => {
       e.preventDefault();
+      const answer1 = parseInt(document.getElementById("answer1").value, 10);
+
       const formData = new FormData();
-      formData.append("quiz_name", document.getElementById("quiz_name").value);
-      formData.append("score", document.getElementById("score").value);
+      formData.append("quiz_name", "Matematika Dasar");
+      formData.append("answer", answer1);
 
       try {
-        const res = await fetch("/api/quiz/submit", {
+        const res = await fetch("/api/quiz/grade", {
           method: "POST",
           body: formData,
           credentials: "include"
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || "Gagal submit skor");
-        }
+        if (!res.ok) throw new Error("Gagal submit jawaban");
         const data = await res.json();
-        msgBox.textContent = "✅ " + data.message;
-        msgBox.className = "message success";
-        msgBox.style.display = "block";
-        setTimeout(() => { window.location.href = "/dashboard.html"; }, 1500);
+        quizMessage.innerHTML = `<p style="color:green">Jawaban dinilai, skor: ${data.score}</p>`;
+        loadProfile();
+        loadLeaderboard();
       } catch (err) {
-        msgBox.textContent = "❌ " + err.message;
-        msgBox.className = "message error";
-        msgBox.style.display = "block";
+        quizMessage.innerHTML = `<p style="color:red">${err.message}</p>`;
       }
     });
+
+    async function loadProfile() {
+      try {
+        const res = await fetch("/api/profile", { credentials: "include" });
+        if (!res.ok) throw new Error("Gagal memuat profil");
+        const data = await res.json();
+        let html = `
+          <p><strong>Nama:</strong> ${data.username}</p>
+          <p><strong>Total Kuis:</strong> ${data.total_quizzes}</p>
+          <p><strong>Total Skor:</strong> ${data.total_score}</p>
+          <p><strong>Rata-rata:</strong> ${data.average_score}</p>
+          <table>
+            <tr><th>Nama Kuis</th><th>Skor</th><th>Tanggal</th></tr>`;
+        data.scores.forEach(s => {
+          html += `<tr><td>${s.quiz_name}</td><td>${s.score}</td><td>${s.timestamp}</td></tr>`;
+        });
+        html += `</table>`;
+        profileInfo.innerHTML = html;
+      } catch (err) {
+        profileInfo.innerHTML = `<p style="color:red">${err.message}</p>`;
+      }
+    }
+
+    async function loadLeaderboard() {
+      try {
+        const res = await fetch("/api/leaderboard", { credentials: "include" });
+        if (!res.ok) throw new Error("Gagal memuat leaderboard");
+        const data = await res.json();
+        if (!data.leaderboard || data.leaderboard.length === 0) {
+          leaderboardInfo.innerHTML = "<p>Belum ada data leaderboard.</p>";
+          return;
+        }
+
+        let html = `
+          <table>
+            <tr><th>Peringkat</th><th>Nama</th><th>Total Skor</th><th>Rata-rata</th></tr>`;
+        data.leaderboard.forEach((s) => {
+          html += `<tr>
+            <td>${s.rank}</td>
+            <td>${s.username}</td>
+            <td>${s.total_score}</td>
+            <td>${s.average_score}</td>
+          </tr>`;
+        });
+        html += `</table>`;
+        leaderboardInfo.innerHTML = html;
+      } catch (err) {
+        leaderboardInfo.innerHTML = `<p style="color:red">${err.message}</p>`;
+      }
+    }
+
+    loadProfile();
+    loadLeaderboard();
   </script>
 </body>
 </html>
