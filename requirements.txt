@@ -5,4 +5,4 @@ asyncpg
 itsdangerous
 bcrypt
 python-multipart
-
+PyJWT
