@@ -140,11 +140,11 @@ async def login(response: Response, username: str = Form(...), password: str = F
         raise HTTPException(status_code=400, detail="Nama pengguna atau kata sandi salah")
 
     is_correct_password = check_password(password, user.password)
-    
+
     if not is_correct_password:
         time.sleep(0.5)
         raise HTTPException(status_code=400, detail="Nama pengguna atau kata sandi salah")
-        
+
     # Buat dan kirim token JWT
     token = create_jwt_token({"username": user.username, "role": user.role})
     
@@ -307,7 +307,7 @@ async def health():
 # -------------------------
 # Shutdown event untuk dispose engine
 # -------------------------
-    
+
 @app.on_event("shutdown")
 async def shutdown_event():
     print("Shutting down the application...")
