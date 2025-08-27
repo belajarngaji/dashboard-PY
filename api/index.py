@@ -25,6 +25,13 @@ app.add_middleware(
 users_db = {}
 scores_db = {}
 
+# Soal kuis dengan jawaban benar
+quiz_questions = {
+    "Matematika Dasar": [
+        {"question": "Berapakah hasil dari 15 + 20?", "answer": 35}
+    ]
+}
+
 # Konfigurasi sesi
 SECRET_KEY = os.getenv("SECRET_KEY", "quiz-secret-key-change-in-production")
 serializer = URLSafeTimedSerializer(SECRET_KEY)
@@ -96,7 +103,7 @@ async def login(response: Response, username: str = Form(...)):
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=True,  # aktifkan HTTPS
+        secure=True,  # aktifkan HTTPS di production
         samesite="lax",
         max_age=SESSION_TIMEOUT
     )
@@ -107,19 +114,22 @@ async def logout(response: Response):
     response.delete_cookie(SESSION_COOKIE_NAME)
     return {"message": "Berhasil logout"}
 
-@app.post("/api/quiz/submit")
-async def submit_quiz(request: Request, quiz_name: str = Form(...), score: int = Form(...)):
+# Endpoint Penilaian Otomatis
+@app.post("/api/quiz/grade")
+async def grade_quiz(request: Request, quiz_name: str = Form(...), answer: int = Form(...)):
     check_and_reset_data()
     user = require_auth(request)
     uid = user["user_id"]
 
-    if not quiz_name.strip():
-        raise HTTPException(status_code=400, detail="Nama kuis diperlukan")
-    if score < 0:
-        raise HTTPException(status_code=400, detail="Skor tidak boleh negatif")
+    if quiz_name not in quiz_questions:
+        raise HTTPException(status_code=400, detail="Kuis tidak ditemukan")
+
+    correct_answer = quiz_questions[quiz_name][0]["answer"]
+    score = 100 if answer == correct_answer else 0
 
     scores_db.setdefault(uid, {})[quiz_name] = {"score": score, "timestamp": datetime.now()}
-    return {"message": "Skor disimpan", "quiz_name": quiz_name, "score": score}
+
+    return {"message": "Jawaban dinilai", "score": score}
 
 @app.get("/api/profile")
 async def profile(request: Request):
@@ -165,8 +175,5 @@ async def leaderboard():
 async def health():
     return {"status": "healthy", "time": datetime.now().isoformat()}
 
-# =======================
-#   MAIN ENTRY (opsional)
-# =======================
 if __name__ == "__main__":
     uvicorn.run("index:app", host="0.0.0.0", port=5000)
