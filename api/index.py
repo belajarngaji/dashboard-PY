@@ -1,5 +1,6 @@
 # api/index.py
 import os
+import bcrypt
 from datetime import datetime
 from typing import Optional, Dict
 
@@ -17,7 +18,7 @@ app = FastAPI(title="Quiz Backend (Supabase)")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # production: ganti ke domain frontend
+    allow_origins=["*"],  # production: ganti ke domain frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -113,29 +114,53 @@ async def get_current_user(request: Request) -> Dict[str, str]:
 # -------------------------
 @app.post("/api/login")
 async def login(response: Response, username: str = Form(...), password: str = Form(...)):
-    name = (username or "").strip()
-    if len(name) < 2:
+    username = username.strip().lower()
+    if len(username) < 2:
         raise HTTPException(status_code=400, detail="Nama pengguna tidak valid")
 
     async with AsyncSessionMaker() as session:
-        q = sa.select(users.c.username, users.c.password, users.c.role)\
-            .where(sa.func.lower(users.c.username) == name.lower())
+        q = sa.select(users.c.username, users.c.password, users.c.role).where(users.c.username == username)
         res = await session.execute(q)
         row = res.first()
 
-        if row:
-            db_username, db_password, db_role = row
-            if db_password != password:
-                raise HTTPException(status_code=401, detail="Username atau password salah")
-            username_final, role = db_username, db_role
-            message = f"Selamat datang kembali, {username_final}!"
-        else:
-            username_final, role = name, "murid"
-            await session.execute(users.insert().values(username=username_final, password=password, role=role))
-            await session.commit()
-            message = f"Akun baru dibuat untuk {username_final}!"
+        if not row:
+            raise HTTPException(status_code=401, detail="Username atau password salah")
+        
+        db_username, db_password, db_role = row
+        if not bcrypt.checkpw(password.encode('utf-8'), db_password.encode('utf-8')):
+            raise HTTPException(status_code=401, detail="Username atau password salah")
+        
+        token = create_session_token(db_username, db_role)
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=token,
+            httponly=True,
+            samesite="lax",
+            max_age=SESSION_TIMEOUT
+        )
+        return {"message": f"Selamat datang kembali, {db_username}!", "username": db_username, "role": db_role}
 
-    token = create_session_token(username_final, role)
+@app.post("/api/signup")
+async def signup(response: Response, username: str = Form(...), password: str = Form(...)):
+    username = username.strip().lower()
+    if len(username) < 2:
+        raise HTTPException(status_code=400, detail="Nama pengguna tidak valid")
+
+    async with AsyncSessionMaker() as session:
+        # Cek apakah username sudah ada
+        q = sa.select(users.c.username).where(users.c.username == username)
+        res = await session.execute(q)
+        if res.first():
+            raise HTTPException(status_code=409, detail="Username sudah digunakan")
+
+        # Hash password dan buat akun baru
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        role = "murid"
+        
+        await session.execute(users.insert().values(username=username, password=hashed_password, role=role))
+        await session.commit()
+    
+    token = create_session_token(username, role)
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,
@@ -143,7 +168,7 @@ async def login(response: Response, username: str = Form(...), password: str = F
         samesite="lax",
         max_age=SESSION_TIMEOUT
     )
-    return {"message": message, "username": username_final, "role": role}
+    return {"message": f"Akun baru dibuat untuk {username}!", "username": username, "role": role}
 
 @app.get("/api/logout")
 async def logout(response: Response):
@@ -235,3 +260,4 @@ async def health():
 @app.on_event("shutdown")
 async def shutdown_event():
     await engine.dispose()
+                                
