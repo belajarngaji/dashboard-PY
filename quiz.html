@@ -96,88 +96,96 @@
     </div>
   </div>
 
-  <script>
-    const quizForm = document.getElementById("quizForm");
-    const quizMessage = document.getElementById("quizMessage");
-    const profileInfo = document.getElementById("profileInfo");
-    const leaderboardInfo = document.getElementById("leaderboardInfo");
+<script>
+  const quizForm = document.getElementById("quizForm");
+  const quizMessage = document.getElementById("quizMessage");
+  const profileInfo = document.getElementById("profileInfo");
+  const leaderboardInfo = document.getElementById("leaderboardInfo");
 
-    quizForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const answer1 = parseInt(document.getElementById("answer1").value, 10);
-
-      const formData = new FormData();
-      formData.append("quiz_name", "Matematika Dasar");
-      formData.append("answer", answer1);
-
-      try {
-        const res = await fetch("/api/quiz/grade", {
-          method: "POST",
-          body: formData,
-          credentials: "include"
-        });
-        if (!res.ok) throw new Error("Gagal submit jawaban");
-        const data = await res.json();
-        quizMessage.innerHTML = `<p style="color:green">Jawaban dinilai, skor: ${data.score}</p>`;
-        loadProfile();
-        loadLeaderboard();
-      } catch (err) {
-        quizMessage.innerHTML = `<p style="color:red">${err.message}</p>`;
-      }
-    });
-
-    async function loadProfile() {
-      try {
-        const res = await fetch("/api/profile", { credentials: "include" });
-        if (!res.ok) throw new Error("Gagal memuat profil");
-        const data = await res.json();
-        let html = `
-          <p><strong>Nama:</strong> ${data.username}</p>
-          <p><strong>Total Kuis:</strong> ${data.total_quizzes}</p>
-          <p><strong>Total Skor:</strong> ${data.total_score}</p>
-          <p><strong>Rata-rata:</strong> ${data.average_score}</p>
-          <table>
-            <tr><th>Nama Kuis</th><th>Skor</th><th>Tanggal</th></tr>`;
-        data.scores.forEach(s => {
-          html += `<tr><td>${s.quiz_name}</td><td>${s.score}</td><td>${s.timestamp}</td></tr>`;
-        });
-        html += `</table>`;
-        profileInfo.innerHTML = html;
-      } catch (err) {
-        profileInfo.innerHTML = `<p style="color:red">${err.message}</p>`;
-      }
+  quizForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const answer1 = parseInt(document.getElementById("answer1").value, 10);
+    if (isNaN(answer1)) {
+      quizMessage.innerHTML = `<p style="color:red">Jawaban harus berupa angka!</p>`;
+      return;
     }
 
-    async function loadLeaderboard() {
-      try {
-        const res = await fetch("/api/leaderboard", { credentials: "include" });
-        if (!res.ok) throw new Error("Gagal memuat leaderboard");
-        const data = await res.json();
-        if (!data.leaderboard || data.leaderboard.length === 0) {
-          leaderboardInfo.innerHTML = "<p>Belum ada data leaderboard.</p>";
-          return;
-        }
+    const formData = new FormData();
+    formData.append("quiz_name", "Matematika Dasar");
+    formData.append("answer", answer1);
 
-        let html = `
-          <table>
-            <tr><th>Peringkat</th><th>Nama</th><th>Total Skor</th><th>Rata-rata</th></tr>`;
-        data.leaderboard.forEach((s) => {
-          html += `<tr>
-            <td>${s.rank}</td>
-            <td>${s.username}</td>
-            <td>${s.total_score}</td>
-            <td>${s.average_score}</td>
-          </tr>`;
-        });
-        html += `</table>`;
-        leaderboardInfo.innerHTML = html;
-      } catch (err) {
-        leaderboardInfo.innerHTML = `<p style="color:red">${err.message}</p>`;
+    try {
+      const res = await fetch("/api/quiz/grade", {
+        method: "POST",
+        body: formData,
+        credentials: "include"
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || "Gagal submit jawaban");
       }
+      const data = await res.json();
+      quizMessage.innerHTML = `<p style="color:green">Jawaban dinilai, skor: ${data.score}</p>`;
+      await loadProfile();
+      await loadLeaderboard();
+    } catch (err) {
+      quizMessage.innerHTML = `<p style="color:red">${err.message}</p>`;
     }
+  });
 
-    loadProfile();
-    loadLeaderboard();
-  </script>
+  async function loadProfile() {
+    try {
+      const res = await fetch("/api/profile", { credentials: "include" });
+      if (!res.ok) throw new Error("Gagal memuat profil");
+      const data = await res.json();
+      let html = `
+        <p><strong>Nama:</strong> ${data.username}</p>
+        <p><strong>Total Kuis:</strong> ${data.total_quizzes}</p>
+        <p><strong>Total Skor:</strong> ${data.total_score}</p>
+        <p><strong>Rata-rata:</strong> ${data.average_score}</p>
+        <table>
+          <tr><th>Nama Kuis</th><th>Skor</th><th>Tanggal</th></tr>`;
+      data.scores.forEach(s => {
+        const dateStr = new Date(s.timestamp).toLocaleString("id-ID");
+        html += `<tr><td>${s.quiz_name}</td><td>${s.score}</td><td>${dateStr}</td></tr>`;
+      });
+      html += `</table>`;
+      profileInfo.innerHTML = html;
+    } catch (err) {
+      profileInfo.innerHTML = `<p style="color:red">${err.message}</p>`;
+    }
+  }
+
+  async function loadLeaderboard() {
+    try {
+      const res = await fetch("/api/leaderboard", { credentials: "include" });
+      if (!res.ok) throw new Error("Gagal memuat leaderboard");
+      const data = await res.json();
+      if (!data.leaderboard || data.leaderboard.length === 0) {
+        leaderboardInfo.innerHTML = "<p>Belum ada data leaderboard.</p>";
+        return;
+      }
+
+      let html = `
+        <table>
+          <tr><th>Peringkat</th><th>Nama</th><th>Total Skor</th><th>Rata-rata</th></tr>`;
+      data.leaderboard.forEach((s) => {
+        html += `<tr>
+          <td>${s.rank}</td>
+          <td>${s.username}</td>
+          <td>${s.total_score}</td>
+          <td>${s.average_score}</td>
+        </tr>`;
+      });
+      html += `</table>`;
+      leaderboardInfo.innerHTML = html;
+    } catch (err) {
+      leaderboardInfo.innerHTML = `<p style="color:red">${err.message}</p>`;
+    }
+  }
+
+  loadProfile();
+  loadLeaderboard();
+</script>
 </body>
 </html>
