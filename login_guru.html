@@ -76,6 +76,7 @@
     <h2 class="login-title">🔑 Login Guru</h2>
     <form id="loginForm">
       <input type="text" id="username" class="form-input" placeholder="Masukkan nama guru" required />
+      <input type="password" id="password" class="form-input" placeholder="Masukkan password" required />
       <button type="submit" class="login-btn">Masuk</button>
     </form>
     <div id="error" class="error-message"></div>
@@ -83,11 +84,16 @@
 
   <script>
     const form = document.getElementById("loginForm");
+    const errorBox = document.getElementById("error");
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const username = document.getElementById("username").value;
+      const password = document.getElementById("password").value;
+
       const formData = new FormData();
       formData.append("username", username);
+      formData.append("password", password);
 
       try {
         const res = await fetch("/api/login", {
@@ -95,14 +101,16 @@
           body: formData,
           credentials: "include"
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || "Gagal login");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Gagal login");
+
+        if (data.role === "guru") {
+          window.location.href = "/dashboard";
+        } else {
+          errorBox.textContent = "Role tidak sesuai. Gunakan login murid.";
+          errorBox.style.display = "block";
         }
-        await res.json();
-        window.location.href = "/dashboard";
       } catch (err) {
-        const errorBox = document.getElementById("error");
         errorBox.textContent = err.message;
         errorBox.style.display = "block";
       }
