@@ -113,7 +113,7 @@
           throw new Error(err.error || "Gagal login");
         }
         await res.json();
-        window.location.href = "/dashboard.html";
+        window.location.href = "/quiz";
       } catch (err) {
         const errorBox = document.getElementById("error");
         errorBox.textContent = err.message;
