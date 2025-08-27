@@ -7,16 +7,15 @@ from datetime import datetime, timedelta
 import uvicorn
 import os
 
-# Inisialisasi FastAPI
 app = FastAPI(
     title="Quiz Backend API - Professional Edition",
     description="Backend profesional untuk aplikasi web kuis dengan login tanpa kata sandi dan pemantauan data"
 )
 
-# CORS (atur origin sesuai domain frontend kamu di produksi)
+# Middleware CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],   # ganti di produksi dengan domain frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,7 +36,6 @@ last_reset_time = datetime.now()
 RESET_INTERVAL_DAYS = 7
 
 def check_and_reset_data():
-    """Reset data setiap 7 hari sekali"""
     global last_reset_time, users_db, scores_db
     now = datetime.now()
     if now - last_reset_time >= timedelta(days=RESET_INTERVAL_DAYS):
@@ -98,7 +96,7 @@ async def login(response: Response, username: str = Form(...)):
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=False,  # ganti True kalau sudah HTTPS
+        secure=True,  # aktifkan HTTPS
         samesite="lax",
         max_age=SESSION_TIMEOUT
     )
@@ -168,7 +166,7 @@ async def health():
     return {"status": "healthy", "time": datetime.now().isoformat()}
 
 # =======================
-#   MAIN ENTRY
+#   MAIN ENTRY (opsional)
 # =======================
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=5000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=5000)
