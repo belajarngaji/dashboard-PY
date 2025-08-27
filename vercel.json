@@ -20,6 +20,10 @@
     {
       "src": "quiz.html",
       "use": "@vercel/static"
+    },
+    {
+      "src": "signup.html",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
@@ -27,7 +31,7 @@
     { "src": "/dashboard", "dest": "dashboard.html" },
     { "src": "/quiz", "dest": "quiz.html" },
     { "src": "/login_guru", "dest": "login_guru.html" },
+    { "src": "/signup", "dest": "signup.html" },
     { "src": "/", "dest": "login.html" }
   ]
 }
-
