@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Login Murid - Quiz</title>
   <style>
     body {
@@ -14,7 +14,6 @@
       height: 100vh;
       margin: 0;
     }
-
     .login-card {
       background: white;
       border-radius: 12px;
@@ -25,14 +24,12 @@
       text-align: center;
       animation: fadeIn 0.6s ease-in-out;
     }
-
     .login-title {
       font-size: 1.8rem;
       font-weight: 600;
       color: #1565c0;
       margin-bottom: 1.5rem;
     }
-
     .form-input {
       width: 100%;
       padding: 12px;
@@ -42,13 +39,11 @@
       font-size: 1rem;
       transition: border-color 0.3s;
     }
-
     .form-input:focus {
       border-color: #42a5f5;
       outline: none;
       box-shadow: 0 0 5px rgba(66,165,245,0.4);
     }
-
     .login-btn {
       width: 100%;
       padding: 12px;
@@ -61,12 +56,10 @@
       cursor: pointer;
       transition: transform 0.2s, box-shadow 0.2s;
     }
-
     .login-btn:hover {
       transform: translateY(-2px);
       box-shadow: 0 6px 15px rgba(66,165,245,0.3);
     }
-
     .error-message {
       color: #c62828;
       background: #ffebee;
@@ -77,7 +70,6 @@
       display: none;
       font-size: 0.9rem;
     }
-
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(20px); }
       to { opacity: 1; transform: translateY(0); }
@@ -89,6 +81,7 @@
     <h2 class="login-title">🔑 Login Murid</h2>
     <form id="loginForm">
       <input type="text" id="username" class="form-input" placeholder="Masukkan nama Anda" required />
+      <input type="password" id="password" class="form-input" placeholder="Masukkan password" required />
       <button type="submit" class="login-btn">Masuk</button>
     </form>
     <div id="error" class="error-message"></div>
@@ -96,11 +89,16 @@
 
   <script>
     const form = document.getElementById("loginForm");
+    const errorBox = document.getElementById("error");
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const username = document.getElementById("username").value;
+      const password = document.getElementById("password").value;
+
       const formData = new FormData();
       formData.append("username", username);
+      formData.append("password", password);
 
       try {
         const res = await fetch("/api/login", {
@@ -108,14 +106,16 @@
           body: formData,
           credentials: "include"
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || "Gagal login");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Gagal login");
+
+        if (data.role === "murid") {
+          window.location.href = "/quiz";
+        } else {
+          errorBox.textContent = "Role tidak sesuai. Gunakan login guru.";
+          errorBox.style.display = "block";
         }
-        await res.json();
-        window.location.href = "/quiz";
       } catch (err) {
-        const errorBox = document.getElementById("error");
         errorBox.textContent = err.message;
         errorBox.style.display = "block";
       }
