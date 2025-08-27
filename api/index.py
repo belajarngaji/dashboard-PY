@@ -1,6 +1,5 @@
 # api/index.py
 import os
-import uuid
 from datetime import datetime
 from typing import Optional, Dict
 
@@ -12,46 +11,43 @@ from fastapi.middleware.cors import CORSMiddleware
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 # -------------------------
-# Basic app + CORS
+# FastAPI app + CORS
 # -------------------------
 app = FastAPI(title="Quiz Backend (Supabase)")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # ganti ke domain frontend di production
+    allow_origins=["*"],   # production: ganti ke domain frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # -------------------------
-# DATABASE URL handling
+# DATABASE
 # -------------------------
 RAW_DB_URL = os.getenv("DATABASE_URL", "")
 if not RAW_DB_URL:
     raise RuntimeError("DATABASE_URL belum di-set di environment")
 
-# Convert common Supabase URI forms to asyncpg form accepted by SQLAlchemy
 DB_URL = RAW_DB_URL
 if DB_URL.startswith("postgres://"):
     DB_URL = DB_URL.replace("postgres://", "postgresql+asyncpg://", 1)
 elif DB_URL.startswith("postgresql://") and "+asyncpg" not in DB_URL:
     DB_URL = DB_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-# -------------------------
-# Create async engine (disable statement cache)
-# -------------------------
+# engine global, statement_cache_size=0 untuk pgbouncer transaction mode
 engine = create_async_engine(
     DB_URL,
     echo=False,
     pool_pre_ping=True,
-    connect_args={"statement_cache_size": 0}  # penting untuk pgbouncer mode transaction
+    connect_args={"statement_cache_size": 0}
 )
 AsyncSessionMaker = async_sessionmaker(engine, expire_on_commit=False)
-
 metadata = sa.MetaData()
 
 # -------------------------
-# Reflect existing tables
+# Tables
 # -------------------------
 users = sa.Table(
     "users", metadata,
@@ -70,7 +66,7 @@ scores = sa.Table(
 )
 
 # -------------------------
-# Simple quiz bank
+# Quiz bank
 # -------------------------
 quiz_questions = {
     "Matematika Dasar": [
@@ -79,12 +75,12 @@ quiz_questions = {
 }
 
 # -------------------------
-# Session token (cookie)
+# Session tokens
 # -------------------------
 SECRET_KEY = os.getenv("SECRET_KEY", "ganti-ini-di-production")
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 SESSION_COOKIE_NAME = "quiz_session"
-SESSION_TIMEOUT = 60 * 60 * 24 * 7  # detik (7 hari)
+SESSION_TIMEOUT = 60 * 60 * 24 * 7  # 7 hari
 
 def create_session_token(username: str, role: str) -> str:
     return serializer.dumps({"username": username, "role": role})
@@ -102,16 +98,18 @@ async def get_current_user(request: Request) -> Dict[str, str]:
     data = verify_session_token(token)
     if not data:
         raise HTTPException(status_code=401, detail="Token tidak valid atau kadaluarsa")
+
     async with AsyncSessionMaker() as session:
         q = sa.select(users.c.username, users.c.role).where(users.c.username == data["username"])
         res = await session.execute(q)
         row = res.first()
         if not row:
             raise HTTPException(status_code=401, detail="User tidak ditemukan")
+
     return {"username": data["username"], "role": data.get("role", "")}
 
 # -------------------------
-# API endpoints
+# API Endpoints
 # -------------------------
 @app.post("/api/login")
 async def login(response: Response, username: str = Form(...), password: str = Form(...)):
@@ -120,20 +118,19 @@ async def login(response: Response, username: str = Form(...), password: str = F
         raise HTTPException(status_code=400, detail="Nama pengguna tidak valid")
 
     async with AsyncSessionMaker() as session:
-        q = sa.select(users.c.username, users.c.password, users.c.role).where(sa.func.lower(users.c.username) == name.lower())
+        q = sa.select(users.c.username, users.c.password, users.c.role)\
+            .where(sa.func.lower(users.c.username) == name.lower())
         res = await session.execute(q)
         row = res.first()
 
         if row:
-            db_username, db_password, db_role = row[0], row[1], row[2]
+            db_username, db_password, db_role = row
             if db_password != password:
                 raise HTTPException(status_code=401, detail="Username atau password salah")
-            username_final = db_username
-            role = db_role
+            username_final, role = db_username, db_role
             message = f"Selamat datang kembali, {username_final}!"
         else:
-            role = "murid"
-            username_final = name
+            username_final, role = name, "murid"
             await session.execute(users.insert().values(username=username_final, password=password, role=role))
             await session.commit()
             message = f"Akun baru dibuat untuk {username_final}!"
@@ -215,17 +212,26 @@ async def leaderboard():
         )
         rows = r.fetchall()
 
-    result = []
-    for i, row in enumerate(rows, start=1):
-        result.append({
-            "rank": i,
-            "username": row.username,
-            "total_score": int(row.total_score or 0),
-            "average_score": float(round(row.average_score or 0, 2)),
-            "quiz_count": int(row.quiz_count or 0),
-        })
-    return {"leaderboard": result}
+    return {
+        "leaderboard": [
+            {
+                "rank": i + 1,
+                "username": row.username,
+                "total_score": int(row.total_score or 0),
+                "average_score": float(round(row.average_score or 0, 2)),
+                "quiz_count": int(row.quiz_count or 0),
+            }
+            for i, row in enumerate(rows)
+        ]
+    }
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "time": datetime.utcnow().isoformat()}
+
+# -------------------------
+# Shutdown event untuk dispose engine
+# -------------------------
+@app.on_event("shutdown")
+async def shutdown_event():
+    await engine.dispose()
