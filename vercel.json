@@ -27,11 +27,29 @@
     }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "api/index.py" },
-    { "src": "/dashboard", "dest": "dashboard.html" },
-    { "src": "/quiz", "dest": "quiz.html" },
-    { "src": "/login_guru", "dest": "login_guru.html" },
-    { "src": "/signup", "dest": "signup.html" },
-    { "src": "/", "dest": "login.html" }
+    {
+      "src": "/api/(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/dashboard",
+      "dest": "dashboard.html"
+    },
+    {
+      "src": "/quiz",
+      "dest": "quiz.html"
+    },
+    {
+      "src": "/login_guru",
+      "dest": "login_guru.html"
+    },
+    {
+      "src": "/signup",
+      "dest": "signup.html"
+    },
+    {
+      "src": "/",
+      "dest": "login.html"
+    }
   ]
 }
