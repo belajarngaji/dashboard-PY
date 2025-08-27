@@ -8,10 +8,20 @@
     {
       "src": "dashboard.html",
       "use": "@vercel/static"
+    },
+    {
+      "src": "login.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "quiz.html",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "api/index.py" },
-    { "src": "/", "dest": "dashboard.html" }
+    { "src": "/dashboard", "dest": "dashboard.html" },
+    { "src": "/quiz", "dest": "quiz.html" },
+    { "src": "/", "dest": "login.html" }
   ]
 }
