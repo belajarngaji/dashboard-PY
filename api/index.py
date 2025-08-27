@@ -1,11 +1,13 @@
 # api/index.py
 import os
 import bcrypt
-from datetime import datetime
+import jwt
+from datetime import datetime, timedelta
 from typing import Optional, Dict
 
 import sqlalchemy as sa
 import asyncio
+import time
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 from fastapi import FastAPI, Request, Response, HTTPException, Form
@@ -45,177 +47,224 @@ engine = create_async_engine(
     pool_pre_ping=True,
     connect_args={"statement_cache_size": 0}
 )
-AsyncSessionMaker = async_sessionmaker(engine, expire_on_commit=False)
-metadata = sa.MetaData()
+AsyncSessionMaker = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 # -------------------------
-# Tables
+# MODEL
 # -------------------------
+meta = sa.MetaData()
 users = sa.Table(
-    "users", metadata,
-    sa.Column("username", sa.Text, primary_key=True),
-    sa.Column("password", sa.Text, nullable=False),
-    sa.Column("role", sa.Text, nullable=False),
+    "users",
+    meta,
+    sa.Column("id", sa.Integer, primary_key=True),
+    sa.Column("username", sa.String(255), unique=True, nullable=False),
+    sa.Column("password", sa.String(255), nullable=False),
+    sa.Column("role", sa.String(50), nullable=False),
 )
-
 scores = sa.Table(
-    "scores", metadata,
-    sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
-    sa.Column("username", sa.Text, sa.ForeignKey("users.username", ondelete="CASCADE")),
-    sa.Column("quiz_name", sa.Text),
-    sa.Column("score", sa.Integer),
-    sa.Column("timestamp", sa.DateTime(timezone=False)),
+    "scores",
+    meta,
+    sa.Column("id", sa.Integer, primary_key=True),
+    sa.Column("username", sa.String(255), nullable=False),
+    sa.Column("quiz_name", sa.String(255), nullable=False),
+    sa.Column("score", sa.Integer, nullable=False),
+    sa.Column("timestamp", sa.DateTime, server_default=sa.func.now(), nullable=False),
 )
 
 # -------------------------
-# Quiz bank
+# AUTHENTICATION & SECURITY
 # -------------------------
-quiz_questions = {
-    "Matematika Dasar": [
-        {"question": "Berapakah hasil dari 15 + 20?", "answer": 35}
-    ]
-}
+SECRET_KEY = os.environ.get("SECRET_KEY", "super-secret-key-jangan-dipakai-di-prod")
 
-# -------------------------
-# Session tokens
-# -------------------------
-SECRET_KEY = os.getenv("SECRET_KEY", "ganti-ini-di-production")
-serializer = URLSafeTimedSerializer(SECRET_KEY)
-SESSION_COOKIE_NAME = "quiz_session"
-SESSION_TIMEOUT = 60 * 60 * 24 * 7  # 7 hari
+def hash_password(password: str):
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-def create_session_token(username: str, role: str) -> str:
-    return serializer.dumps({"username": username, "role": role})
+def check_password(password: str, hashed_password: str):
+    return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
 
-def verify_session_token(token: str) -> Optional[Dict[str, str]]:
+def create_jwt_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(days=7)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm="HS256")
+    return encoded_jwt
+
+def decode_jwt_token(token: str):
     try:
-        return serializer.loads(token, max_age=SESSION_TIMEOUT)
-    except (BadSignature, SignatureExpired):
-        return None
-
-async def get_current_user(request: Request) -> Dict[str, str]:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not token:
-        raise HTTPException(status_code=401, detail="Login diperlukan")
-    data = verify_session_token(token)
-    if not data:
-        raise HTTPException(status_code=401, detail="Token tidak valid atau kadaluarsa")
-
-    async with AsyncSessionMaker() as session:
-        q = sa.select(users.c.username, users.c.role).where(users.c.username == data["username"])
-        res = await session.execute(q)
-        row = res.first()
-        if not row:
-            raise HTTPException(status_code=401, detail="User tidak ditemukan")
-
-    return {"username": data["username"], "role": data.get("role", "")}
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None  # Token kedaluwarsa
+    except jwt.InvalidTokenError:
+        return None  # Token tidak valid
 
 # -------------------------
-# API Endpoints
+# ENDPOINTS
 # -------------------------
-@app.post("/api/login")
-async def login(response: Response, username: str = Form(...), password: str = Form(...)):
-    username = username.strip().lower()
-    if len(username) < 2:
-        raise HTTPException(status_code=400, detail="Nama pengguna tidak valid")
-
-    async with AsyncSessionMaker() as session:
-        q = sa.select(users.c.username, users.c.password, users.c.role).where(users.c.username == username)
-        res = await session.execute(q)
-        row = res.first()
-
-        if not row:
-            raise HTTPException(status_code=401, detail="Username atau password salah")
-        
-        db_username, db_password, db_role = row
-        if not bcrypt.checkpw(password.encode('utf-8'), db_password.encode('utf-8')):
-            raise HTTPException(status_code=401, detail="Username atau password salah")
-        
-        token = create_session_token(db_username, db_role)
-        response.set_cookie(
-            key=SESSION_COOKIE_NAME,
-            value=token,
-            httponly=True,
-            samesite="lax",
-            max_age=SESSION_TIMEOUT
-        )
-        return {"message": f"Selamat datang kembali, {db_username}!", "username": db_username, "role": db_role}
-
 @app.post("/api/signup")
-async def signup(response: Response, username: str = Form(...), password: str = Form(...)):
-    username = username.strip().lower()
-    if len(username) < 2:
-        raise HTTPException(status_code=400, detail="Nama pengguna tidak valid")
-
+async def signup(
+    response: Response, username: str = Form(...), password: str = Form(...)
+):
     async with AsyncSessionMaker() as session:
         # Cek apakah username sudah ada
-        q = sa.select(users.c.username).where(users.c.username == username)
-        res = await session.execute(q)
-        if res.first():
-            raise HTTPException(status_code=409, detail="Username sudah digunakan")
-
-        # Hash password dan buat akun baru
-        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        role = "murid"
+        q_user = sa.select(users).where(users.c.username == username)
+        res = await session.execute(q_user)
+        user_exists = res.scalar_one_or_none()
         
-        await session.execute(users.insert().values(username=username, password=hashed_password, role=role))
+        if user_exists:
+            time.sleep(0.5)
+            raise HTTPException(status_code=400, detail="Username sudah terdaftar")
+        
+        # Hash password dan simpan user baru
+        hashed_password = hash_password(password)
+        
+        q_insert = sa.insert(users).values(
+            username=username, password=hashed_password, role="murid"
+        ).returning(users)
+        
+        res = await session.execute(q_insert)
         await session.commit()
-    
-    token = create_session_token(username, role)
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=SESSION_TIMEOUT
-    )
-    return {"message": f"Akun baru dibuat untuk {username}!", "username": username, "role": role}
+        
+    time.sleep(0.5)
+    return {"message": "Akun baru berhasil dibuat"}
 
-@app.get("/api/logout")
-async def logout(response: Response):
-    response.delete_cookie(SESSION_COOKIE_NAME)
-    return {"message": "Berhasil logout"}
-
-@app.post("/api/quiz/grade")
-async def grade_quiz(request: Request, quiz_name: str = Form(...), answer: int = Form(...)):
-    user = await get_current_user(request)
-    username = user["username"]
-
-    if quiz_name not in quiz_questions:
-        raise HTTPException(status_code=400, detail="Kuis tidak ditemukan")
-
-    correct_answer = quiz_questions[quiz_name][0]["answer"]
-    score = 100 if answer == correct_answer else 0
-
+@app.post("/api/login")
+async def login(response: Response, username: str = Form(...), password: str = Form(...)):
     async with AsyncSessionMaker() as session:
-        await session.execute(
-            scores.insert().values(username=username, quiz_name=quiz_name, score=score, timestamp=datetime.utcnow())
-        )
-        await session.commit()
+        q = sa.select(users).where(users.c.username == username)
+        res = await session.execute(q)
+        user = res.scalar_one_or_none()
 
-    return {"message": "Jawaban dinilai", "score": score}
+    if not user:
+        time.sleep(0.5)
+        raise HTTPException(status_code=400, detail="Nama pengguna atau kata sandi salah")
+
+    is_correct_password = check_password(password, user.password)
+    
+    if not is_correct_password:
+        time.sleep(0.5)
+        raise HTTPException(status_code=400, detail="Nama pengguna atau kata sandi salah")
+        
+    # Buat dan kirim token JWT
+    token = create_jwt_token({"username": user.username, "role": user.role})
+    
+    # Set cookie di response
+    response.set_cookie(key="token", value=token, httponly=True, samesite="strict", secure=True, expires=datetime.utcnow() + timedelta(days=7))
+
+    time.sleep(0.5)
+    return {"message": "Selamat datang kembali", "username": user.username, "role": user.role}
 
 @app.get("/api/profile")
-async def profile(request: Request):
-    user = await get_current_user(request)
-    username = user["username"]
+async def get_profile(request: Request):
+    token = request.cookies.get("token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Tidak terautentikasi")
 
+    payload = decode_jwt_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token tidak valid atau kedaluwarsa")
+        
+    username = payload.get("username")
+    
     async with AsyncSessionMaker() as session:
-        r = await session.execute(
-            sa.select(scores.c.quiz_name, scores.c.score, scores.c.timestamp)
-            .where(scores.c.username == username)
-            .order_by(scores.c.timestamp.desc())
-        )
-        rows = r.fetchall()
+        # Ambil profil user
+        q_user = sa.select(users).where(users.c.username == username)
+        res_user = await session.execute(q_user)
+        user_profile = res_user.scalar_one_or_none()
+        
+        if not user_profile:
+            raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan")
+            
+        # Ambil semua skor kuis user
+        q_scores = sa.select(scores).where(scores.c.username == username).order_by(scores.c.timestamp.desc())
+        res_scores = await session.execute(q_scores)
+        user_scores = res_scores.fetchall()
+    
+    return {
+        "profile": {
+            "username": user_profile.username,
+            "role": user_profile.role,
+        },
+        "scores": [
+            {
+                "quiz_name": row.quiz_name,
+                "score": row.score,
+                "timestamp": row.timestamp.isoformat() if row.timestamp else None
+            }
+            for row in user_scores
+        ]
+    }
+    
+@app.post("/api/submit_quiz")
+async def submit_quiz(request: Request, quiz_name: str = Form(...), score: int = Form(...)):
+    token = request.cookies.get("token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Tidak terautentikasi")
+    
+    payload = decode_jwt_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token tidak valid atau kedaluwarsa")
+    
+    username = payload.get("username")
+    
+    async with AsyncSessionMaker() as session:
+        q_insert = sa.insert(scores).values(
+            username=username, quiz_name=quiz_name, score=score
+        ).returning(scores)
+        
+        res = await session.execute(q_insert)
+        await session.commit()
+    
+    return {"message": "Skor kuis berhasil disimpan"}
 
-    total = sum(r.score for r in rows) if rows else 0
-    avg = round(total / len(rows), 2) if rows else 0.0
+@app.post("/api/logout")
+async def logout(response: Response):
+    response.delete_cookie(key="token")
+    return {"message": "Berhasil logout"}
+
+@app.get("/api/murid")
+async def get_murid(request: Request):
+    token = request.cookies.get("token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Tidak terautentikasi")
+    
+    payload = decode_jwt_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token tidak valid atau kedaluwarsa")
+        
+    if payload.get("role") != "guru":
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+        
+    async with AsyncSessionMaker() as session:
+        q = sa.select(users).where(users.c.role == "murid").order_by(users.c.username)
+        res = await session.execute(q)
+        rows = res.fetchall()
 
     return {
-        "username": username,
-        "total_quizzes": len(rows),
-        "total_score": total,
-        "average_score": avg,
+        "murid": [
+            {"username": row.username, "role": row.role} for row in rows
+        ]
+    }
+
+@app.get("/api/murid_scores")
+async def murid_scores(request: Request, username: str):
+    token = request.cookies.get("token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Tidak terautentikasi")
+    
+    payload = decode_jwt_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token tidak valid atau kedaluwarsa")
+    
+    if payload.get("role") != "guru":
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+        
+    async with AsyncSessionMaker() as session:
+        q = sa.select(scores).where(scores.c.username == username).order_by(scores.c.timestamp.desc())
+        res = await session.execute(q)
+        rows = res.fetchall()
+
+    return {
         "scores": [
             {"quiz_name": row.quiz_name, "score": row.score, "timestamp": (row.timestamp.isoformat() if row.timestamp else None)}
             for row in rows
@@ -262,6 +311,7 @@ async def health():
 @app.on_event("shutdown")
 async def shutdown_event():
     print("Shutting down the application...")
-    await asyncio.sleep(0.250) # Memberi waktu bagi koneksi untuk ditutup
+    # Penting: Beri waktu bagi koneksi untuk ditutup secara asinkron
+    await asyncio.sleep(0.250)
     await engine.dispose()
     print("Database connections closed.")
