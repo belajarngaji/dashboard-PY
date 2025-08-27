@@ -1,107 +1,219 @@
-from fastapi import FastAPI, Form, Depends, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text
-from itsdangerous import URLSafeSerializer
+# api/index.py
 import os
+import uuid
 from datetime import datetime
+from typing import Optional, Dict
 
-app = FastAPI()
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
-# Middleware CORS
+from fastapi import FastAPI, Request, Response, HTTPException, Form
+from fastapi.middleware.cors import CORSMiddleware
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+
+# -------------------------
+# Basic app + CORS
+# -------------------------
+app = FastAPI(title="Quiz Backend (Supabase)")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],   # ganti ke domain frontend di production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Database
-DATABASE_URL = os.environ.get("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL not found in environment")
+# -------------------------
+# DATABASE URL handling
+# -------------------------
+RAW_DB_URL = os.getenv("DATABASE_URL", "")
+if not RAW_DB_URL:
+    raise RuntimeError("DATABASE_URL belum di-set di environment")
 
-engine = create_async_engine(DATABASE_URL, echo=False)
-async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+# Convert common Supabase URI forms to asyncpg form accepted by SQLAlchemy
+DB_URL = RAW_DB_URL
+if DB_URL.startswith("postgres://"):
+    DB_URL = DB_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+elif DB_URL.startswith("postgresql://") and "+asyncpg" not in DB_URL:
+    DB_URL = DB_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-# Token serializer
-serializer = URLSafeSerializer("supersecretkey")
+engine = create_async_engine(DB_URL, echo=False, pool_pre_ping=True)
+AsyncSessionMaker = async_sessionmaker(engine, expire_on_commit=False)
 
-# Dependency
-async def get_db():
-    async with async_session() as session:
-        yield session
+metadata = sa.MetaData()
 
-# Login endpoint (guru/murid)
+# reflect the tables we created in Supabase (do NOT create or alter tables here)
+users = sa.Table(
+    "users", metadata,
+    sa.Column("username", sa.Text, primary_key=True),
+    sa.Column("password", sa.Text, nullable=False),
+    sa.Column("role", sa.Text, nullable=False),
+)
+
+scores = sa.Table(
+    "scores", metadata,
+    sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+    sa.Column("username", sa.Text, sa.ForeignKey("users.username", ondelete="CASCADE")),
+    sa.Column("quiz_name", sa.Text),
+    sa.Column("score", sa.Integer),
+    sa.Column("timestamp", sa.DateTime(timezone=False)),
+)
+
+# -------------------------
+# simple quiz bank (auto-grade)
+# -------------------------
+quiz_questions = {
+    "Matematika Dasar": [
+        {"question": "Berapakah hasil dari 15 + 20?", "answer": 35}
+    ]
+}
+
+# -------------------------
+# session token (cookie)
+# -------------------------
+SECRET_KEY = os.getenv("SECRET_KEY", "ganti-ini-di-production")
+serializer = URLSafeTimedSerializer(SECRET_KEY)
+SESSION_COOKIE_NAME = "quiz_session"
+SESSION_TIMEOUT = 60 * 60 * 24 * 7  # detik (7 hari)
+
+def create_session_token(username: str, role: str) -> str:
+    return serializer.dumps({"username": username, "role": role})
+
+def verify_session_token(token: str) -> Optional[Dict[str, str]]:
+    try:
+        return serializer.loads(token, max_age=SESSION_TIMEOUT)
+    except (BadSignature, SignatureExpired):
+        return None
+
+async def get_current_user(request: Request) -> Dict[str, str]:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="Login diperlukan")
+    data = verify_session_token(token)
+    if not data:
+        raise HTTPException(status_code=401, detail="Token tidak valid atau kadaluarsa")
+    # verify user exists in DB
+    async with AsyncSessionMaker() as session:
+        q = sa.select(users.c.username, users.c.role).where(users.c.username == data["username"])
+        res = await session.execute(q)
+        row = res.first()
+        if not row:
+            raise HTTPException(status_code=401, detail="User tidak ditemukan")
+    return {"username": data["username"], "role": data.get("role", "")}
+
+# -------------------------
+# API endpoints
+# -------------------------
 @app.post("/api/login")
-async def login(username: str = Form(...), password: str = Form(...), db: AsyncSession = Depends(get_db)):
-    q = text("SELECT role FROM users WHERE username = :u AND password = :p")
-    res = await db.execute(q, {"u": username, "p": password})
-    row = res.fetchone()
-    if not row:
-        raise HTTPException(status_code=401, detail="Username atau password salah")
-    role = row[0]
-    token = serializer.dumps({"username": username, "role": role})
-    return {"message": "Login berhasil", "token": token, "role": role}
+async def login(response: Response, username: str = Form(...), password: str = Form(...)):
+    name = (username or "").strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Nama pengguna tidak valid")
 
-# Submit jawaban quiz
+    async with AsyncSessionMaker() as session:
+        q = sa.select(users.c.username, users.c.password, users.c.role).where(sa.func.lower(users.c.username) == name.lower())
+        res = await session.execute(q)
+        row = res.first()
+
+        if row:
+            db_username, db_password, db_role = row[0], row[1], row[2]
+            if db_password != password:
+                raise HTTPException(status_code=401, detail="Username atau password salah")
+            username_final = db_username
+            role = db_role
+            message = f"Selamat datang kembali, {username_final}!"
+        else:
+            # create user
+            role = "murid"
+            username_final = name
+            await session.execute(users.insert().values(username=username_final, password=password, role=role))
+            await session.commit()
+            message = f"Akun baru dibuat untuk {username_final}!"
+
+    token = create_session_token(username_final, role)
+    # NOTE: secure=True recommended in production (HTTPS). Set to False for local/dev.
+    response.set_cookie(key=SESSION_COOKIE_NAME, value=token, httponly=True, samesite="lax", max_age=SESSION_TIMEOUT)
+    return {"message": message, "username": username_final, "role": role}
+
+@app.get("/api/logout")
+async def logout(response: Response):
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    return {"message": "Berhasil logout"}
+
 @app.post("/api/quiz/grade")
-async def grade_quiz(username: str = Form(...), quiz_name: str = Form(...), answer: int = Form(...), db: AsyncSession = Depends(get_db)):
-    # Penilaian otomatis contoh sederhana
-    correct_answer = 42
+async def grade_quiz(request: Request, quiz_name: str = Form(...), answer: int = Form(...)):
+    user = await get_current_user(request)
+    username = user["username"]
+
+    if quiz_name not in quiz_questions:
+        raise HTTPException(status_code=400, detail="Kuis tidak ditemukan")
+
+    correct_answer = quiz_questions[quiz_name][0]["answer"]
     score = 100 if answer == correct_answer else 0
 
-    # Simpan skor
-    await db.execute(
-        text("""INSERT INTO scores (username, quiz_name, score, timestamp)
-                VALUES (:u, :q, :s, :t)"""),
-        {"u": username, "q": quiz_name, "s": score, "t": datetime.utcnow()},
-    )
-    await db.commit()
-    return {"message": "Skor berhasil disimpan", "score": score}
+    async with AsyncSessionMaker() as session:
+        # insert a new score row (allow history). If you want one score per quiz per user, change logic.
+        await session.execute(
+            scores.insert().values(username=username, quiz_name=quiz_name, score=score, timestamp=datetime.utcnow())
+        )
+        await session.commit()
 
-# Profil murid
+    return {"message": "Jawaban dinilai", "score": score}
+
 @app.get("/api/profile")
-async def profile(username: str, db: AsyncSession = Depends(get_db)):
-    q1 = text("SELECT COUNT(*), COALESCE(SUM(score), 0), COALESCE(AVG(score), 0) FROM scores WHERE username = :u")
-    res1 = await db.execute(q1, {"u": username})
-    total_quizzes, total_score, average_score = res1.fetchone()
+async def profile(request: Request):
+    user = await get_current_user(request)
+    username = user["username"]
 
-    q2 = text("SELECT quiz_name, score, timestamp FROM scores WHERE username = :u ORDER BY timestamp DESC")
-    res2 = await db.execute(q2, {"u": username})
-    scores = [{"quiz_name": r[0], "score": r[1], "timestamp": r[2].isoformat()} for r in res2.fetchall()]
+    async with AsyncSessionMaker() as session:
+        r = await session.execute(
+            sa.select(scores.c.quiz_name, scores.c.score, scores.c.timestamp)
+            .where(scores.c.username == username)
+            .order_by(scores.c.timestamp.desc())
+        )
+        rows = r.fetchall()
+
+    total = sum(r.score for r in rows) if rows else 0
+    avg = round(total / len(rows), 2) if rows else 0.0
 
     return {
         "username": username,
-        "total_quizzes": total_quizzes,
-        "total_score": total_score,
-        "average_score": round(average_score, 2),
-        "scores": scores,
+        "total_quizzes": len(rows),
+        "total_score": total,
+        "average_score": avg,
+        "scores": [
+            {"quiz_name": row.quiz_name, "score": row.score, "timestamp": (row.timestamp.isoformat() if row.timestamp else None)}
+            for row in rows
+        ],
     }
 
-# Leaderboard
 @app.get("/api/leaderboard")
-async def leaderboard(db: AsyncSession = Depends(get_db)):
-    q = text("""
-        SELECT username,
-               SUM(score) AS total_score,
-               AVG(score) AS average_score
-        FROM scores
-        GROUP BY username
-        ORDER BY total_score DESC
-        LIMIT 10
-    """)
-    res = await db.execute(q)
-    data = []
-    rank = 1
-    for row in res.fetchall():
-        data.append({
-            "rank": rank,
-            "username": row[0],
-            "total_score": row[1],
-            "average_score": round(row[2], 2)
+async def leaderboard():
+    async with AsyncSessionMaker() as session:
+        r = await session.execute(
+            sa.select(
+                scores.c.username,
+                sa.func.sum(scores.c.score).label("total_score"),
+                sa.func.avg(scores.c.score).label("average_score"),
+                sa.func.count(scores.c.id).label("quiz_count")
+            )
+            .group_by(scores.c.username)
+            .order_by(sa.text("total_score DESC"))
+            .limit(10)
+        )
+        rows = r.fetchall()
+
+    result = []
+    for i, row in enumerate(rows, start=1):
+        result.append({
+            "rank": i,
+            "username": row.username,
+            "total_score": int(row.total_score or 0),
+            "average_score": float(round(row.average_score or 0, 2)),
+            "quiz_count": int(row.quiz_count or 0),
         })
-        rank += 1
-    return {"leaderboard": data}
+    return {"leaderboard": result}
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "time": datetime.utcnow().isoformat()}
