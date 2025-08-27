@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional, Dict
 
 import sqlalchemy as sa
+import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 from fastapi import FastAPI, Request, Response, HTTPException, Form
@@ -257,7 +258,10 @@ async def health():
 # -------------------------
 # Shutdown event untuk dispose engine
 # -------------------------
+    
 @app.on_event("shutdown")
 async def shutdown_event():
+    print("Shutting down the application...")
+    await asyncio.sleep(0.250) # Memberi waktu bagi koneksi untuk ditutup
     await engine.dispose()
-                                
+    print("Database connections closed.")
