@@ -3,4 +3,6 @@ uvicorn
 sqlalchemy[asyncio]
 asyncpg
 itsdangerous
+bcrypt
 python-multipart
+
