@@ -37,12 +37,22 @@ if DB_URL.startswith("postgres://"):
 elif DB_URL.startswith("postgresql://") and "+asyncpg" not in DB_URL:
     DB_URL = DB_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-engine = create_async_engine(DB_URL, echo=False, pool_pre_ping=True)
+# -------------------------
+# Create async engine (disable statement cache)
+# -------------------------
+engine = create_async_engine(
+    DB_URL,
+    echo=False,
+    pool_pre_ping=True,
+    connect_args={"statement_cache_size": 0}  # penting untuk pgbouncer mode transaction
+)
 AsyncSessionMaker = async_sessionmaker(engine, expire_on_commit=False)
 
 metadata = sa.MetaData()
 
-# reflect the tables we created in Supabase (do NOT create or alter tables here)
+# -------------------------
+# Reflect existing tables
+# -------------------------
 users = sa.Table(
     "users", metadata,
     sa.Column("username", sa.Text, primary_key=True),
@@ -60,7 +70,7 @@ scores = sa.Table(
 )
 
 # -------------------------
-# simple quiz bank (auto-grade)
+# Simple quiz bank
 # -------------------------
 quiz_questions = {
     "Matematika Dasar": [
@@ -69,7 +79,7 @@ quiz_questions = {
 }
 
 # -------------------------
-# session token (cookie)
+# Session token (cookie)
 # -------------------------
 SECRET_KEY = os.getenv("SECRET_KEY", "ganti-ini-di-production")
 serializer = URLSafeTimedSerializer(SECRET_KEY)
@@ -92,7 +102,6 @@ async def get_current_user(request: Request) -> Dict[str, str]:
     data = verify_session_token(token)
     if not data:
         raise HTTPException(status_code=401, detail="Token tidak valid atau kadaluarsa")
-    # verify user exists in DB
     async with AsyncSessionMaker() as session:
         q = sa.select(users.c.username, users.c.role).where(users.c.username == data["username"])
         res = await session.execute(q)
@@ -123,7 +132,6 @@ async def login(response: Response, username: str = Form(...), password: str = F
             role = db_role
             message = f"Selamat datang kembali, {username_final}!"
         else:
-            # create user
             role = "murid"
             username_final = name
             await session.execute(users.insert().values(username=username_final, password=password, role=role))
@@ -131,8 +139,13 @@ async def login(response: Response, username: str = Form(...), password: str = F
             message = f"Akun baru dibuat untuk {username_final}!"
 
     token = create_session_token(username_final, role)
-    # NOTE: secure=True recommended in production (HTTPS). Set to False for local/dev.
-    response.set_cookie(key=SESSION_COOKIE_NAME, value=token, httponly=True, samesite="lax", max_age=SESSION_TIMEOUT)
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=SESSION_TIMEOUT
+    )
     return {"message": message, "username": username_final, "role": role}
 
 @app.get("/api/logout")
@@ -152,7 +165,6 @@ async def grade_quiz(request: Request, quiz_name: str = Form(...), answer: int =
     score = 100 if answer == correct_answer else 0
 
     async with AsyncSessionMaker() as session:
-        # insert a new score row (allow history). If you want one score per quiz per user, change logic.
         await session.execute(
             scores.insert().values(username=username, quiz_name=quiz_name, score=score, timestamp=datetime.utcnow())
         )
