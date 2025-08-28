@@ -29,9 +29,9 @@ app.add_middleware(
 # -------------------------
 # DATABASE
 # -------------------------
-RAW_DB_URL = os.getenv("DATABASE_URL", "")
+RAW_DB_URL = os.getenv("SUPABASE_URL", "")
 if not RAW_DB_URL:
-    raise RuntimeError("DATABASE_URL belum di-set di environment")
+    raise RuntimeError("SUPABASE_URL belum di-set di environment")
 
 DB_URL = RAW_DB_URL
 if DB_URL.startswith("postgres://"):
