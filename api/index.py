@@ -9,9 +9,11 @@ from typing import Optional, Dict
 from supabase import create_client, Client
 from fastapi import FastAPI, Request, Response, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
+
 -------------------------
 FastAPI app + CORS
 -------------------------
+
 app = FastAPI(title="Quiz Backend (Supabase API)")
 
 app.add_middleware( CORSMiddleware, allow_origins=[""], allow_credentials=True, allow_methods=[""], allow_headers=["*"], )
@@ -19,6 +21,7 @@ app.add_middleware( CORSMiddleware, allow_origins=[""], allow_credentials=True, 
 -------------------------
 DATABASE
 -------------------------
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL") SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY: raise RuntimeError("SUPABASE_URL atau SUPABASE_KEY belum di-set di environment")
@@ -28,6 +31,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 -------------------------
 AUTHENTICATION & SECURITY
 -------------------------
+
 SECRET_KEY = os.environ.get("SECRET_KEY", "super-secret-key-jangan-dipakai-di-prod")
 
 def hash_password(password: str): return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
