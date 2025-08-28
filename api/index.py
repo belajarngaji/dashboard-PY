@@ -18,7 +18,7 @@ app = FastAPI(title="Quiz Backend (Supabase API)")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # production: ganti ke domain frontend
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
