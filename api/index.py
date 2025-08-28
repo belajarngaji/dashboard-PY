@@ -1,9 +1,14 @@
 api/index.py
-import os import bcrypt import jwt from datetime import datetime, timedelta from typing import Optional, Dict import time
+import os
+import time
+import bcrypt
+import jwt
+from datetime import datetime, timedelta
+from typing import Optional, Dict
 
 from supabase import create_client, Client
-
-from fastapi import FastAPI, Request, Response, HTTPException, Form from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, Response, HTTPException, Form
+from fastapi.middleware.cors import CORSMiddleware
 -------------------------
 FastAPI app + CORS
 -------------------------
