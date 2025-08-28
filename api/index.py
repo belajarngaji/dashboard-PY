@@ -10,17 +10,17 @@ from supabase import create_client, Client
 from fastapi import FastAPI, Request, Response, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 
--------------------------
+#-------------------------
 FastAPI app + CORS
--------------------------
+#-------------------------
 
 app = FastAPI(title="Quiz Backend (Supabase API)")
 
 app.add_middleware( CORSMiddleware, allow_origins=[""], allow_credentials=True, allow_methods=[""], allow_headers=["*"], )
 
--------------------------
-DATABASE
--------------------------
+#-------------------------
+#DATABASE
+#-------------------------
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL") SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
@@ -28,9 +28,9 @@ if not SUPABASE_URL or not SUPABASE_KEY: raise RuntimeError("SUPABASE_URL atau S
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
--------------------------
-AUTHENTICATION & SECURITY
--------------------------
+#-------------------------
+#AUTHENTICATION & SECURITY
+#-------------------------
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "super-secret-key-jangan-dipakai-di-prod")
 
@@ -42,9 +42,9 @@ def create_jwt_token(data: dict): to_encode = data.copy() expire = datetime.utcn
 
 def decode_jwt_token(token: str): try: payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"]) return payload except jwt.ExpiredSignatureError: return None except jwt.InvalidTokenError: return None
 
--------------------------
-ENDPOINTS
--------------------------
+#-------------------------
+#ENDPOINTS
+#-------------------------
 
 @app.post("/api/signup") async def signup(response: Response, username: str = Form(...), password: str = Form(...)): res = supabase.from_("users").select("*").eq("username", username).execute() user_exists = res.data
 
